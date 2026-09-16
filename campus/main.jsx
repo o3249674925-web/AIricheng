@@ -54,7 +54,7 @@ function App() {
       if (mode === 'local') result = parseLocal(text, reference, data.tasks, source.trim());
       else {
         const r = await fetch('/api/extract', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${access}` }, signal: AbortSignal.timeout(40000), body: JSON.stringify({ text, reference, source: source.trim(), tasks: active.slice(0, 100).map(({ id, title, deadline, source }) => ({ id, title, deadline, source })) }) });
-        const v = await r.json(); if (!r.ok) throw Error(v.error || 'AI 请求失败');
+        const v = await r.json(); if (!r.ok) throw Error(`${v.error || 'AI 请求失败'}${v.diagnosticCode ? `（诊断码：${v.diagnosticCode}）` : ''}`);
         result = extractionSchema.parse(v).candidates.map(c => ({ ...c, id: uid(), warning: 'AI 提取结果，请核对原文后确认。' }));
       }
       setCandidates(result.map(c => ({ ...c, source: source.trim() }))); setView('inbox'); setModal(null); setNotice(result.length ? `已生成 ${result.length} 条候选，请逐条确认` : '未找到可确认的任务，请补充通知内容');

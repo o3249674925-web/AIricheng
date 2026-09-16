@@ -43,7 +43,12 @@ async function upstreamDetail(response) {
       const code = error?.code || body?.code || '';
       const message = error?.message || body?.message || '';
       return redactDetail([code, message].filter(Boolean).join(': ') || text);
-    } catch { return redactDetail(text); }
+    } catch {
+      // Never echo an unstructured provider body: it may contain request IDs,
+      // headers, or other sensitive data. Preserve only a safe diagnostic code.
+      const code = text.match(/\bmodel_[a-z0-9_]+\b/i)?.[0] || '';
+      return redactDetail(code);
+    }
   } catch { return ''; }
 }
 

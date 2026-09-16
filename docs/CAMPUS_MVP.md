@@ -35,4 +35,4 @@ npm run dev:campus
 
 ## GitHub Actions
 
-仓库准备好后，把 Cloudflare 凭据放入 GitHub Actions Secrets（`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`），即可在 push 到 `main` 时运行构建与 `wrangler deploy`。本地发布前先用 `npm run test:campus` 和 `npm run build:campus`。
+`pages.yml` 会在 `main` 更新后发布静态页面；Worker 使用上面的 `deploy-worker.yml` 手动发布，不会因普通提交自动覆盖线上版本。本地发布前先用 `npm run test:campus` 和 `npm run build:campus`。

@@ -24,10 +24,10 @@ npm run dev:campus
 
 1. `npm run build:campus`
 2. `npx wrangler login`
-3. 在 Cloudflare Worker Secrets 中设置 `AI_API_KEY`；变量中设置 `AI_API_URL`、`AI_MODEL`。可选 `AI_ACCESS_TOKEN` 保护 `/api/extract`。
+3. 在 Cloudflare Worker Secrets 中设置 `AI_API_KEY`；变量中设置 `AI_API_URL`、`AI_MODEL`。`AI_API_URL` 可以填写完整的 `/chat/completions` 地址，也可以只填写服务商的 `/v1` 基础地址，Worker 会自动补全。可选 `AI_ACCESS_TOKEN` 保护 `/api/extract`；只有明确需要强制 JSON 模式的服务商才设置 `AI_JSON_MODE=json_object`。
 4. `npx wrangler deploy`
 
-`wrangler.jsonc` 使用 Workers Static Assets 直接托管 `dist-campus/`，Worker 同时提供 `/api/health` 与 `/api/extract`。未配置模型时接口返回 503，页面保持本地规则模式，不会伪装成 AI 已可用。
+`wrangler.jsonc` 使用 Workers Static Assets 直接托管 `dist-campus/`，Worker 同时提供 `/api/health` 与 `/api/extract`。请求默认不发送 `response_format`，以兼容更多 OpenAI-compatible 服务；模型提示词仍要求只返回 JSON。未配置模型时接口返回 503，页面保持本地规则模式，不会伪装成 AI 已可用。模型接口失败时会返回诊断码，例如 `model_auth_failed`、`model_endpoint_or_name_not_found` 或 `model_preflight_failed`。
 
 ## GitHub Actions
 

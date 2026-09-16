@@ -29,6 +29,10 @@ npm run dev:campus
 
 `wrangler.jsonc` 使用 Workers Static Assets 直接托管 `dist-campus/`，Worker 同时提供 `/api/health` 与 `/api/extract`。请求默认不发送 `response_format`，以兼容更多 OpenAI-compatible 服务；模型提示词仍要求只返回 JSON。未配置模型时接口返回 503，页面保持本地规则模式，不会伪装成 AI 已可用。模型接口失败时会返回诊断码，例如 `model_auth_failed`、`model_endpoint_or_name_not_found` 或 `model_preflight_failed`。
 
+### 仅用手机时的 Worker 发布
+
+仓库提供手动 GitHub Actions 工作流 `.github/workflows/deploy-worker.yml`。首次使用前，在仓库 Settings → Secrets and variables → Actions 中添加 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`；Token 只保存为 GitHub Secret，不要写入代码。之后在 Actions → Deploy campus MVP Worker → Run workflow 中勾选确认即可发布当前 `main` 分支。工作流只在手动触发时发布，不会因普通代码提交自动覆盖线上 Worker。
+
 ## GitHub Actions
 
 仓库准备好后，把 Cloudflare 凭据放入 GitHub Actions Secrets（`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`），即可在 push 到 `main` 时运行构建与 `wrangler deploy`。本地发布前先用 `npm run test:campus` 和 `npm run build:campus`。

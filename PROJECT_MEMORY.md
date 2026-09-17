@@ -73,7 +73,7 @@
 发布状态：
 - GitHub Pages 已启用，最新安全修复提交 `a70441b0d57b760fb677f9ed4f2cddcc940490d7` 对应的 workflow 运行成功（run `35140469770`）。地址：<https://o3249674925-web.github.io/AIricheng/>；GitHub Pages 工作流未因 Worker 部署而修改。
 - Cloudflare Worker 已部署，地址：<https://kexu-campus-mvp.richeng.workers.dev>。首页、JS/CSS 静态资源和 `/api/health` 均通过 HTTP 200 检查；规则模式可用。
-- 最近一次通过 GitHub Actions 发布 Worker 的尝试因 Cloudflare API 返回错误码 `7003` 失败，原因待核对 `CLOUDFLARE_ACCOUNT_ID`（必须是 Cloudflare Account ID，不是 Zone ID、Token 或 Worker 名称）；修正后需重新运行手动工作流。
+- 已修正 Cloudflare Account ID 与 API Token 权限；最新一次 GitHub Actions 手动发布 Worker 成功。
 - 已将模型适配修复同步到 GitHub（Worker、页面错误提示和部署说明）。修复内容包括自动补全 `/v1/chat/completions`、默认不发送易引发兼容问题的 `response_format`、识别更多模型返回格式和可读诊断码。GitHub Pages 已更新；Cloudflare Worker 还需要用最新 `worker.js` 重新发布后，线上提取接口才会使用这份修复。受接口访问码保护，当前环境无法替代用户验证真实模型调用。
 - 为支持仅移动端推进，已新增并激活手动 GitHub Actions 工作流 `.github/workflows/deploy-worker.yml`。配置 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 两个 GitHub Secret 后，可直接在手机 GitHub Actions 页面手动发布 Worker；普通提交不会自动发布。部署说明已同步，GitHub Pages 最新 workflow 运行成功（run `35142633826`）。
 - 日程任务仍只保存在浏览器本地；没有账号系统或云端数据同步。

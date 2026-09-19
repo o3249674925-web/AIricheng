@@ -122,3 +122,8 @@
 - 12 项桥接测试通过，Python 编译和 `git diff --check` 通过。真实 `--once --poll --diagnostic` 验证输出 `POLL_ONCE_BASELINE recent=13 uploaded=0`，退出码 0；使用独立测试目录后，又为正式本机目录建立同样的去重基线。未调用模型、未上传内容、未发送微信消息。
 - 正式队列验证前为 done=6 / pending=0 / failed=0，旧状态仅有 version/seen；已建立新版 baseline_ready，防止下一次重新处理旧消息。
 - 本次修改尚未提交/推送，不涉及 Worker 或 Pages 部署。随后用户发送新的验收通知并运行修复后的脚本，本机 `done` 从 6 增至 9，`pending=0`、`failed=0`；3 个新结果均来自目标群、各含 1 条候选及截止时间，确认“微信读取 → Worker `/api/extract` → 模型返回候选”已真实跑通。网页导入与人工确认仍由用户在浏览器完成；候选不会自动写入本地任务。
+
+## 2026-09-19 单次导入简化
+
+- 为减少用户逐个选择结果文件的操作，单次扫描成功发送后会在 `%LOCALAPPDATA%\\AIricheng\\wechat-bridge\\latest-batch.json` 写入本次成功结果数组；原有 `done` 逐条记录保留用于追溯。
+- 桥接测试仍为 12 项通过，前端测试 6 项通过；本次只改本地桥接与文档，不需要重新发布 Worker。

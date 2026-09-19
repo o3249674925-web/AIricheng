@@ -285,6 +285,12 @@ class EventStore:
             except FileNotFoundError:
                 pass
 
+    def write_latest_batch(self, records: list[dict[str, Any]]) -> None:
+        """Write one convenient import file while retaining per-event records."""
+
+        if records:
+            _atomic_json(self.root / "latest-batch.json", records)
+
     def mark_baseline(self, fingerprints: set[str]) -> None:
         """Persist visible messages as ignored before one-shot scanning."""
 
@@ -420,6 +426,8 @@ class BridgeRunner:
         self.stop = threading.Event()
         self.worker = threading.Thread(target=self._send_loop, name="ai-extract", daemon=True)
         self.wx: Any = None
+        self.completed_results: list[dict[str, Any]] = []
+        self.completed_lock = threading.Lock()
 
     def _handle_message(self, message: Any, chat: Any, origin: str) -> None:
         try:
@@ -457,6 +465,8 @@ class BridgeRunner:
                 status, result = (200, {"dryRun": True, "candidates": []}) if self.config.dry_run else self.client.extract(event)
                 if status == 200 and isinstance(result, dict) and "error" not in result:
                     self.store.mark_done(event, result)
+                    with self.completed_lock:
+                        self.completed_results.append({"event": event, "result": result})
                     count = len(result.get("candidates", [])) if isinstance(result.get("candidates"), list) else 0
                     marker = "[DRY_RUN_SAVED]" if self.config.dry_run else "[已发送到 Worker]"
                     print(f"{marker} 候选 {count} 条；结果已保存到本机", flush=True)
@@ -565,6 +575,11 @@ class BridgeRunner:
                 self.stop.wait(0.2)
             if self.events.unfinished_tasks:
                 raise RuntimeError("扫描已结束，但发送尚未完成；消息仍保存在本机待重试。")
+            with self.completed_lock:
+                completed = list(self.completed_results)
+            self.store.write_latest_batch(completed)
+            if completed:
+                print(f"[LATEST_BATCH] records={len(completed)} file=latest-batch.json", flush=True)
         finally:
             self.stop.set()
             self.events.put(None)

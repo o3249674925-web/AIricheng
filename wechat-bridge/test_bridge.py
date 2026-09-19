@@ -147,6 +147,9 @@ class SingleScanTests(unittest.TestCase):
             runner.wx = self.main_window()
             runner._scan_once()
             self.assertEqual(len(list((Path(directory) / "done").glob("*.json"))), 1)
+            latest = json.loads((Path(directory) / "latest-batch.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(latest), 1)
+            self.assertEqual(latest[0]["result"]["candidates"], [])
             self.assertFalse(runner.worker.is_alive())
             runner.wx.ChatWith.assert_not_called()
 

@@ -119,7 +119,7 @@ export default { async fetch(request, env) {
   const tasks = Array.isArray(body.tasks) ? body.tasks.slice(0, MAX_TASKS) : [];
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 35000);
   try {
-    const upstream = await fetch(modelUrl, { method: 'POST', signal: controller.signal, headers: { authorization: `Bearer ${env.AI_API_KEY}`, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(chatPayload(env.AI_MODEL, prompt(text, body.reference || '', body.source || '', tasks), env.AI_JSON_MODE === 'json_object')) });
+    const upstream = await fetch(modelUrl, { method: 'POST', signal: controller.signal, headers: { authorization: `Bearer ${env.AI_API_KEY}`, 'content-type': 'application/json', accept: 'application/json', 'user-agent': 'kexu-campus-mvp/0.1' }, body: JSON.stringify(chatPayload(env.AI_MODEL, prompt(text, body.reference || '', body.source || '', tasks), env.AI_JSON_MODE === 'json_object')) });
     if (!upstream.ok) {
       const detail = await upstreamDetail(upstream);
       const failure = upstreamFailure(upstream.status, detail);

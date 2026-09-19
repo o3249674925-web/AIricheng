@@ -1,8 +1,27 @@
+import {
+  SESSION_COOKIE,
+  STATE_COOKIE,
+  SESSION_DAYS,
+  STATE_SECONDS,
+  authConfigured,
+  buildAuthorizeUrl,
+  clearCookie,
+  cookie,
+  exchangeWeChatCode,
+  fetchWeChatProfile,
+  randomHex,
+  readCookie,
+  sha256Hex,
+  stateCookieValue,
+  validStateCookie,
+} from './account.js';
+
 const MAX_TEXT = 12000;
 const MAX_TASKS = 100;
 const MAX_ERROR_DETAIL = 280;
+const MAX_SNAPSHOT = 900000;
 const allowOrigin = origin => !origin || origin === 'http://localhost:5173' || origin.endsWith('.workers.dev');
-const json = (body, status = 200, origin = '') => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(origin && allowOrigin(origin) ? { 'access-control-allow-origin': origin, 'vary': 'Origin' } : {}) } });
+const json = (body, status = 200, origin = '', extraHeaders = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...(origin && allowOrigin(origin) ? { 'access-control-allow-origin': origin, 'vary': 'Origin' } : {}), ...extraHeaders } });
 
 /**
  * Accept either a complete OpenAI-compatible endpoint or a provider base URL.
@@ -103,11 +122,109 @@ function chatPayload(model, userPrompt, jsonMode = false) {
 function prompt(text, reference, source, tasks) {
   return `你是校园任务抽取器。只返回 JSON：{"candidates":[{"action":"create|update|cancel|complete","title":"","deadline":"YYYY-MM-DDTHH:MM 或空字符串","duration":60,"priority":"high|normal|low","targetId":"已有任务id或null","evidence":"原文片段","notes":""}]}。消息来源：${source}。消息日期（北京时间）：${reference}。只在原文明确给出时填写 deadline；“下节课前”“第八周”等无课表上下文时留空。延期、取消、完成必须关联已有任务；不要臆造标题、时间或任务。已有任务：${JSON.stringify(tasks)}。原文：${text}`;
 }
+
+async function sessionUser(request, env) {
+  if (!env?.DB) return null;
+  const token = readCookie(request, SESSION_COOKIE);
+  if (!token) return null;
+  const now = new Date().toISOString();
+  const tokenHash = await sha256Hex(token);
+  const row = await env.DB.prepare('SELECT u.id, u.display_name, u.avatar_url, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?').bind(tokenHash, now).first();
+  return row || null;
+}
+
+function authDisabled(env) {
+  return !authConfigured(env);
+}
+
+async function authMe(request, env, origin) {
+  const user = await sessionUser(request, env);
+  return json({
+    enabled: !authDisabled(env),
+    authenticated: Boolean(user),
+    user: user ? { id: user.id, displayName: user.display_name, avatarUrl: user.avatar_url } : null,
+  }, 200, origin);
+}
+
+async function authStart(request, env, origin) {
+  if (authDisabled(env)) return json({ error: '微信账号功能尚未配置', diagnosticCode: 'auth_not_configured' }, 503, origin);
+  const state = await randomHex(24);
+  const stateValue = await stateCookieValue(state, env.AUTH_STATE_SECRET);
+  const headers = { Location: buildAuthorizeUrl(request, env, state), 'Set-Cookie': cookie(STATE_COOKIE, stateValue, STATE_SECONDS) };
+  return new Response(null, { status: 302, headers });
+}
+
+async function authCallback(request, env, origin) {
+  if (authDisabled(env)) return json({ error: '微信账号功能尚未配置', diagnosticCode: 'auth_not_configured' }, 503, origin);
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code') || '';
+  const returnedState = url.searchParams.get('state') || '';
+  const cookieState = await validStateCookie(readCookie(request, STATE_COOKIE), env.AUTH_STATE_SECRET);
+  if (!code || !returnedState || !cookieState || returnedState !== cookieState) return json({ error: '微信授权状态无效，请重新登录', diagnosticCode: 'auth_state_invalid' }, 400, origin);
+  let token;
+  try { token = await exchangeWeChatCode(code, env); } catch { return json({ error: '微信授权暂时失败，请稍后重试', diagnosticCode: 'wechat_exchange_failed' }, 502, origin); }
+  const subject = typeof token.unionid === 'string' && token.unionid ? token.unionid : token.openid;
+  const profile = await fetchWeChatProfile(token.access_token, token.openid, env);
+  const now = new Date().toISOString();
+  const userId = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO users (id, provider, provider_subject, display_name, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(provider, provider_subject) DO UPDATE SET display_name = excluded.display_name, avatar_url = excluded.avatar_url, updated_at = excluded.updated_at').bind(userId, 'wechat', subject, profile.displayName || '微信用户', profile.avatarUrl || '', now, now).run();
+  const user = await env.DB.prepare('SELECT id FROM users WHERE provider = ? AND provider_subject = ?').bind('wechat', subject).first();
+  if (!user?.id) return json({ error: '账号创建失败，请稍后重试', diagnosticCode: 'account_create_failed' }, 500, origin);
+  const sessionToken = await randomHex(32);
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
+  await env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now).run();
+  await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(await sha256Hex(sessionToken), user.id, now, expiresAt).run();
+  const headers = new Headers({ Location: new URL('/', request.url).toString() });
+  headers.append('Set-Cookie', cookie(SESSION_COOKIE, sessionToken, SESSION_DAYS * 86400));
+  headers.append('Set-Cookie', clearCookie(STATE_COOKIE));
+  return new Response(null, { status: 302, headers });
+}
+
+async function authLogout(request, env, origin) {
+  if (env?.DB) {
+    const token = readCookie(request, SESSION_COOKIE);
+    if (token) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256Hex(token)).run();
+  }
+  return json({ ok: true }, 200, origin, { 'Set-Cookie': clearCookie(SESSION_COOKIE) });
+}
+
+async function syncPull(request, env, origin) {
+  const user = await sessionUser(request, env);
+  if (!user) return json({ error: '请先登录微信账号', diagnosticCode: 'auth_required' }, 401, origin);
+  const row = await env.DB.prepare('SELECT schema_version, payload_json, device_id, updated_at FROM task_snapshots WHERE user_id = ?').bind(user.id).first();
+  if (!row) return json({ snapshot: null }, 200, origin);
+  try { return json({ snapshot: { schemaVersion: row.schema_version, payload: JSON.parse(row.payload_json), deviceId: row.device_id, updatedAt: row.updated_at } }, 200, origin); } catch { return json({ error: '云端数据损坏，请联系管理员', diagnosticCode: 'sync_payload_invalid' }, 500, origin); }
+}
+
+async function syncPush(request, env, origin) {
+  const user = await sessionUser(request, env);
+  if (!user) return json({ error: '请先登录微信账号', diagnosticCode: 'auth_required' }, 401, origin);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: '同步数据格式无效', diagnosticCode: 'sync_request_invalid' }, 400, origin); }
+  const payload = body?.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return json({ error: '同步数据格式无效', diagnosticCode: 'sync_payload_invalid' }, 400, origin);
+  const payloadJson = JSON.stringify(payload);
+  if (!payloadJson || payloadJson.length > MAX_SNAPSHOT) return json({ error: '同步数据不能为空或超过 900KB', diagnosticCode: 'sync_payload_too_large' }, 400, origin);
+  const schemaVersion = Number.isInteger(body.schemaVersion) ? body.schemaVersion : 1;
+  const deviceId = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 100) : '';
+  const current = await env.DB.prepare('SELECT updated_at FROM task_snapshots WHERE user_id = ?').bind(user.id).first();
+  if (current && body.baseUpdatedAt !== current.updated_at) return json({ error: '云端已有更新，请先下载后再上传', diagnosticCode: 'sync_conflict', currentUpdatedAt: current.updated_at }, 409, origin);
+  const updatedAt = new Date().toISOString();
+  await env.DB.prepare('INSERT INTO task_snapshots (user_id, schema_version, payload_json, device_id, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET schema_version = excluded.schema_version, payload_json = excluded.payload_json, device_id = excluded.device_id, updated_at = excluded.updated_at').bind(user.id, schemaVersion, payloadJson, deviceId, updatedAt).run();
+  return json({ ok: true, updatedAt }, 200, origin);
+}
+
 export default { async fetch(request, env) {
   const origin = request.headers.get('Origin') || '';
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': allowOrigin(origin) ? origin : 'null', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'Content-Type,Authorization' } });
   const url = new URL(request.url);
-  if (url.pathname === '/api/health') return json({ ok: true, aiConfigured: configured(env) }, 200, origin);
+  if (url.pathname === '/api/health') return json({ ok: true, aiConfigured: configured(env), authConfigured: authConfigured(env) }, 200, origin);
+  if (url.pathname === '/api/auth/me' && request.method === 'GET') return authMe(request, env, origin);
+  if (url.pathname === '/api/auth/wechat/start' && request.method === 'GET') return authStart(request, env, origin);
+  if (url.pathname === '/api/auth/wechat/callback' && request.method === 'GET') return authCallback(request, env, origin);
+  if (url.pathname === '/api/auth/logout' && request.method === 'POST') return authLogout(request, env, origin);
+  if (url.pathname === '/api/sync/pull' && request.method === 'GET') return syncPull(request, env, origin);
+  if (url.pathname === '/api/sync/push' && request.method === 'PUT') return syncPush(request, env, origin);
   if (url.pathname !== '/api/extract' || request.method !== 'POST') return env.ASSETS?.fetch(request) || new Response('Not found', { status: 404 });
   const modelUrl = normalizeChatCompletionsUrl(env.AI_API_URL);
   if (!env.AI_API_KEY || !env.AI_MODEL || !modelUrl) return json({ error: '服务端尚未正确配置 AI 模型。请检查 AI_API_KEY、AI_API_URL 和 AI_MODEL。', diagnosticCode: 'model_config_missing' }, 503, origin);

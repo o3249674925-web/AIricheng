@@ -36,6 +36,17 @@
 - 每条云端数据必须带 `user_id`，查询和写入都以会话用户为条件。
 - 本地数据首次上传前显示摘要和条数，用户明确确认后才上传；服务端不接收微信登录凭据或 AI API Key。
 
+当前代码已加入上述接口和 D1 迁移文件，但账号功能默认关闭：只有同时提供 D1 绑定、`WECHAT_APP_ID`、`WECHAT_APP_SECRET` 和 `AUTH_STATE_SECRET` 时，`/api/auth/wechat/start` 才会跳转到微信。当前 Worker 没有这些绑定，因此现有用户不会看到半成品登录入口，也不会影响 `/api/extract`。
+
+启用前需要由项目维护者在 Cloudflare 中完成以下配置（值不要写进仓库）：
+
+1. 创建 D1 数据库，将返回的 `database_id` 写入 `wrangler.jsonc` 的 `d1_databases` 绑定 `DB`。
+2. 执行 `wrangler d1 migrations apply <数据库名> --remote`，应用 `migrations/0001_accounts.sql`。
+3. 用 Wrangler Secret 输入 `WECHAT_APP_SECRET` 和 `AUTH_STATE_SECRET`；普通变量设置 `WECHAT_APP_ID`、`WECHAT_AUTH_MODE`（`website` 或 `official`）以及已在微信平台登记的 `WECHAT_REDIRECT_URI`。
+4. 只有在微信开放平台审核通过并配置回调域名后，才部署并做真实授权测试。
+
+登录和同步接口的实际调用必须在配置完成后再测试；不能用现有的 AI 访问码或个人微信登录状态代替微信开放平台授权。
+
 建议接口：
 
 ```text
@@ -58,9 +69,11 @@ PUT  /api/sync/push
 
 ## 当前待定项
 
-开始写登录接口前，只缺两个产品决定：
+登录接口骨架已经完成，但上线前还缺以下外部条件：
 
-1. 选择“微信网页授权”还是“邮箱魔法链接”。
-2. 确认用于回调的自有域名（以及 DNS 是否已接入 Cloudflare）。
+1. 已审核通过的微信网站应用或公众号，以及对应的 AppID。
+2. 用于回调的自有域名（以及 DNS 是否已接入 Cloudflare）。
+3. Cloudflare D1 数据库和绑定。
+4. 在 Cloudflare Secret 中录入 AppSecret 与状态签名密钥。
 
 不要把 AppID、AppSecret、邮件服务密钥、Cloudflare Token 或 AI API Key 发到聊天；它们只能通过对应服务的 Secret/环境变量输入。

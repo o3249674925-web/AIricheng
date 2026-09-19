@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build:campus": "vite build --config vite.campus.config.js",
-    "test:campus": "vitest run campus/domain.test.js campus/bridge.test.js"
+    "test:campus": "vitest run campus/domain.test.js campus/bridge.test.js account.test.js"
   },
   "dependencies": {
     "lucide-react": "0.468.0",

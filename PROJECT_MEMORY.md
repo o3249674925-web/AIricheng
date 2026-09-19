@@ -114,3 +114,11 @@
 - 提交 `ca1f125`、`c0f8c1e`、`862bff9`、`71a6bd0` 已推送到 GitHub `main`。
 - GitHub Pages workflow `35437818545` 成功；资源改为相对路径，页面和脚本均可在 `/AIricheng/` 子路径加载，桥接导入入口已上线。
 - Cloudflare Worker 已同步部署版本 `d38922b4-c7b8-4574-899d-6e31da00a66a`，首页、静态脚本和 `/api/health` 检查通过。
+
+## 2026-09-19 单次扫描窗口修复（本地已验证）
+
+- 用户两次看到 `WORKER_READY` 后出现 `POLL_UNAVAILABLE`。真实桌面验证：微信在线且主窗口已打开“微信接入测试”，`GetSubWindow` 返回空，但主窗口可读取消息。之前把故障归因于用户没有打开微信不准确。
+- 修复单次扫描：直接使用主窗口；必要时只精确切换一次；读取前后校验目标群名；不注册连续监听。读取失败向调用者返回错误，不再静默当作成功结束。启动器增加 UTF-8 设置。
+- 12 项桥接测试通过，Python 编译和 `git diff --check` 通过。真实 `--once --poll --diagnostic` 验证输出 `POLL_ONCE_BASELINE recent=13 uploaded=0`，退出码 0；使用独立测试目录后，又为正式本机目录建立同样的去重基线。未调用模型、未上传内容、未发送微信消息。
+- 正式队列验证前为 done=6 / pending=0 / failed=0，旧状态仅有 version/seen；已建立新版 baseline_ready，防止下一次重新处理旧消息。
+- 本次修改尚未提交/推送，不涉及 Worker 或 Pages 部署。随后用户发送新的验收通知并运行修复后的脚本，本机 `done` 从 6 增至 9，`pending=0`、`failed=0`；3 个新结果均来自目标群、各含 1 条候选及截止时间，确认“微信读取 → Worker `/api/extract` → 模型返回候选”已真实跑通。网页导入与人工确认仍由用户在浏览器完成；候选不会自动写入本地任务。

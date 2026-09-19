@@ -106,6 +106,38 @@ def _chat_name(chat: Any, fallback: str = "") -> str:
     ).strip()
 
 
+class ExactChatReader:
+    """Read the main chat only while its live title matches the allowlist."""
+
+    def __init__(self, chat: Any, target: str):
+        self.chat = chat
+        self.target = target
+
+    def ChatInfo(self) -> dict[str, str]:
+        # Message normalization uses the identity of the verified snapshot.
+        return {"chat_name": self.target}
+
+    def _check_target(self) -> None:
+        if _chat_name(self.chat) != self.target:
+            raise RuntimeError("聊天窗口已切换或无法确认群名，本次扫描已停止；请保持目标群打开。")
+
+    def GetAllMessage(self) -> list[Any]:
+        self._check_target()
+        messages = list(self.chat.GetAllMessage() or [])
+        self._check_target()
+        return messages
+
+
+def single_scan_chat(wx: Any, target: str) -> ExactChatReader:
+    # GetSubWindow only finds a detached chat window. A single scan does not
+    # register a listener (which used to open that window), so use the main UI.
+    if _chat_name(wx) != target:
+        wx.ChatWith(target, exact=True)
+    reader = ExactChatReader(wx, target)
+    reader._check_target()
+    return reader
+
+
 def _is_text_message(message: Any) -> bool:
     kind = _as_text(_value(message, "type", "msg_type", "message_type", default="")).lower()
     if not kind:
@@ -465,6 +497,8 @@ class BridgeRunner:
             try:
                 baseline_messages = list(chat.GetAllMessage() or [])
             except Exception as exc:
+                if self.config.poll_once:
+                    raise RuntimeError("读取目标群失败，本次扫描未完成。请保持目标群可见。") from exc
                 print(f"[POLL_UNAVAILABLE] {type(exc).__name__}", flush=True)
                 return
             for message in baseline_messages:
@@ -490,8 +524,7 @@ class BridgeRunner:
             try:
                 messages = list(chat.GetAllMessage() or [])
             except Exception as exc:
-                print(f"[POLL_ONCE_UNAVAILABLE] {type(exc).__name__}", flush=True)
-                return
+                raise RuntimeError("读取目标群失败，本次扫描未完成。请保持目标群可见。") from exc
             for message in messages:
                 event = normalize_message(message, chat, self.config.chat_name)
                 if not event or event["fingerprint"] in observed or self.store.is_known(event["fingerprint"]):
@@ -518,6 +551,25 @@ class BridgeRunner:
                 baseline.add(fingerprint)
                 self._handle_message(message, chat, "poll")
 
+    def _scan_once(self) -> None:
+        chat = single_scan_chat(self.wx, self.config.chat_name)
+        print(f"[SCAN_ONCE_READY] chat={self.config.chat_name} source=main-window", flush=True)
+        self._load_pending()
+        self.worker.start()
+        try:
+            # Read on the initialization thread; don't move the main UI object
+            # into a polling thread or register a continuous listener.
+            self._poll_loop(chat)
+            deadline = time.monotonic() + 60
+            while self.events.unfinished_tasks and time.monotonic() < deadline and not self.stop.is_set():
+                self.stop.wait(0.2)
+            if self.events.unfinished_tasks:
+                raise RuntimeError("扫描已结束，但发送尚未完成；消息仍保存在本机待重试。")
+        finally:
+            self.stop.set()
+            self.events.put(None)
+            self.worker.join(timeout=3)
+
     def start(self) -> None:
         if not self.config.dry_run:
             access_status = self.client.check_access()
@@ -527,8 +579,6 @@ class BridgeRunner:
                 shown = access_status or "网络错误"
                 raise RuntimeError(f"Worker 接口预检失败（{shown}），未读取或上传微信消息。")
             print("[WORKER_READY] 接口访问码验证通过（未调用模型）", flush=True)
-        self._load_pending()
-        self.worker.start()
         try:
             from wxauto4 import WeChat
         except ImportError as exc:
@@ -541,14 +591,16 @@ class BridgeRunner:
         if not bool(self.wx.IsOnline()):
             raise RuntimeError("微信当前不在线。请先登录个人微信并保持窗口可见。")
         if self.config.poll_once:
-            print(f"[SCAN_ONCE_READY] chat={self.config.chat_name}", flush=True)
-        else:
-            response = self.wx.AddListenChat(self.config.chat_name, callback=self.on_message)
-            if _value(response, "success", default=True) is False:
-                raise RuntimeError("未能注册指定群聊监听，请检查群聊显示名称是否完全一致。")
-            self.wx.StartListening()
-            print(f"[BRIDGE_READY] chat={self.config.chat_name}", flush=True)
-            print("[BRIDGE_WAITING] waiting for new text messages", flush=True)
+            self._scan_once()
+            return
+        self._load_pending()
+        self.worker.start()
+        response = self.wx.AddListenChat(self.config.chat_name, callback=self.on_message)
+        if _value(response, "success", default=True) is False:
+            raise RuntimeError("未能注册指定群聊监听，请检查群聊显示名称是否完全一致。")
+        self.wx.StartListening()
+        print(f"[BRIDGE_READY] chat={self.config.chat_name}", flush=True)
+        print("[BRIDGE_WAITING] waiting for new text messages", flush=True)
         if self.config.diagnostic:
             print("[DIAGNOSTIC_ONLY] callbacks are logged locally; nothing is uploaded", flush=True)
         poll_thread = None
@@ -562,21 +614,11 @@ class BridgeRunner:
             else:
                 poll_thread = threading.Thread(target=self._poll_loop, args=(poll_chat,), name="wechat-poll", daemon=True)
                 poll_thread.start()
-        if not self.config.poll_once:
-            print(f"[桥接已启动] 只监听：{self.config.chat_name}", flush=True)
-            print("[安全范围] 只处理新文字消息，不读取历史、不发送微信消息；按 Ctrl+C 停止。", flush=True)
+        print(f"[桥接已启动] 只监听：{self.config.chat_name}", flush=True)
+        print("[安全范围] 只处理新文字消息，不读取历史、不发送微信消息；按 Ctrl+C 停止。", flush=True)
         try:
-            if self.config.poll_once and poll_thread is None:
-                self.stop.set()
-            elif self.config.poll_once:
-                poll_thread.join()
-                deadline = time.monotonic() + 60
-                while self.events.unfinished_tasks and time.monotonic() < deadline and not self.stop.is_set():
-                    self.stop.wait(0.2)
-                self.stop.set()
-            else:
-                while not self.stop.wait(1):
-                    pass
+            while not self.stop.wait(1):
+                pass
         finally:
             self.stop.set()
             self.events.put(None)

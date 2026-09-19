@@ -102,3 +102,9 @@
 - 网页新增“导入桥接结果”按钮；done JSON 会进入待确认收件箱，仍由用户逐条核对后写入浏览器本地任务。
 - 补齐 Vite、pnpm 锁定依赖和 `dist-campus/index.html` 根目录构建；远程副本验证通过 6 项前端测试、6 项桥接测试、Worker 语法检查和 Python 编译。
 - 当前变更已在独立远程副本中完成验证，尚未推送到 GitHub；现有 `pages.yml` 与 `deploy-worker.yml` 未修改。
+
+## 2026-09-19 远程副本部署状态
+
+- 独立远程副本提交 `ca1f125`（桥接与构建链路）及 `c0f8c1e`（Worker 请求标识）已通过验证。
+- GitHub `main` 推送因认证连接无响应而停止，远程仓库尚未更新；本地提交仍保留在 `AIricheng-remote`。
+- 同一验证副本已部署到 Cloudflare Worker，线上版本 `331bc004-ba94-43ff-a63b-5ba319a922b1`，首页、静态脚本和健康检查均通过。

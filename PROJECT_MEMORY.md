@@ -108,3 +108,9 @@
 - 独立远程副本提交 `ca1f125`（桥接与构建链路）及 `c0f8c1e`（Worker 请求标识）已通过验证。
 - GitHub `main` 推送因认证连接无响应而停止，远程仓库尚未更新；本地提交仍保留在 `AIricheng-remote`。
 - 同一验证副本已部署到 Cloudflare Worker，线上版本 `331bc004-ba94-43ff-a63b-5ba319a922b1`，首页、静态脚本和健康检查均通过。
+
+## 2026-09-19 Pages 与 Worker 最终发布
+
+- 提交 `ca1f125`、`c0f8c1e`、`862bff9`、`71a6bd0` 已推送到 GitHub `main`。
+- GitHub Pages workflow `35437818545` 成功；资源改为相对路径，页面和脚本均可在 `/AIricheng/` 子路径加载，桥接导入入口已上线。
+- Cloudflare Worker 已同步部署版本 `d38922b4-c7b8-4574-899d-6e31da00a66a`，首页、静态脚本和 `/api/health` 检查通过。

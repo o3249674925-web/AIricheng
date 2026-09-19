@@ -51,8 +51,8 @@
 
 ```text
 GET  /api/auth/me
-GET  /api/auth/start
-GET  /api/auth/callback
+GET  /api/auth/wechat/start
+GET  /api/auth/wechat/callback
 POST /api/auth/logout
 GET  /api/sync/pull
 PUT  /api/sync/push

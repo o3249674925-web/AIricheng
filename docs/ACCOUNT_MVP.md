@@ -45,6 +45,8 @@
 3. 用 Wrangler Secret 输入 `WECHAT_APP_SECRET` 和 `AUTH_STATE_SECRET`；普通变量设置 `WECHAT_APP_ID`、`WECHAT_AUTH_MODE`（`website` 或 `official`）以及已在微信平台登记的 `WECHAT_REDIRECT_URI`。
 4. 只有在微信开放平台审核通过并配置回调域名后，才部署并做真实授权测试。
 
+网站应用扫码登录还需在微信开放平台登记“授权回调域”：只填写域名，例如 `app.example.com`，不要填 `https://`、路径或查询参数。代码中的 `WECHAT_REDIRECT_URI` 才填写完整回调地址，例如 `https://app.example.com/api/auth/wechat/callback`；两者必须属于同一域名。
+
 登录和同步接口的实际调用必须在配置完成后再测试；不能用现有的 AI 访问码或个人微信登录状态代替微信开放平台授权。
 
 建议接口：

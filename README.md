@@ -18,3 +18,5 @@
 个人微信接入目前作为独立的本地桥接脚本提供：只监听白名单群的新文字消息，筛选疑似任务后调用现有 Worker；启动时建立不上传的去重基线，也不会自动回复。启动方式见 [`wechat-bridge/README.md`](wechat-bridge/README.md)。
 
 国内访问优化的现状、验证顺序和域名依赖见 [`docs/DOMESTIC_ACCESS.md`](docs/DOMESTIC_ACCESS.md)。
+
+账号功能的范围、登录方式选择和云端同步边界见 [`docs/ACCOUNT_MVP.md`](docs/ACCOUNT_MVP.md)。

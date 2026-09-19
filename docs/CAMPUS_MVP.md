@@ -36,3 +36,9 @@ npm run dev:campus
 ## GitHub Actions
 
 `pages.yml` 会在 `main` 更新后发布静态页面；Worker 使用上面的 `deploy-worker.yml` 手动发布，不会因普通提交自动覆盖线上版本。本地发布前先用 `npm run test:campus` 和 `npm run build:campus`。
+
+## 个人微信本地桥接
+
+`wechat-bridge/bridge.py` 是独立的本地适配器。它只监听命令行指定的一个群聊名称，接收新文字消息，筛选疑似任务后调用现有 Worker 的 `/api/extract`。候选结果和原文证据保存在本机 `%LOCALAPPDATA%\AIricheng\wechat-bridge`，浏览器仍需人工核对后确认。
+
+桥接不处理图片、语音或文件，不发送微信消息，也不接触微信登录凭据。首次启动会建立当前窗口的本地去重基线。需要避免持续占用桌面时，可运行 `wechat-bridge/scan-once.cmd`：首次运行建立基线，后续运行只处理基线之后的新文字，完成后自动退出。Worker 访问码只在本机隐藏输入；OpenAI API Key 仍只配置在 Cloudflare Secret 中。

@@ -1,0 +1,20 @@
+{
+  "name": "airicheng-campus-mvp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:campus": "vite build --config vite.campus.config.js",
+    "test:campus": "vitest run campus/domain.test.js campus/bridge.test.js"
+  },
+  "dependencies": {
+    "lucide-react": "0.468.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "5.4.10",
+    "vitest": "2.1.5"
+  }
+}

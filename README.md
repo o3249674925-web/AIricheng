@@ -15,3 +15,4 @@
 网页使用预构建静态资源；完整开发源码与本地运行说明随项目版本提交。模型密钥只允许配置在 Cloudflare Worker Secrets，严禁提交到仓库。
 
 本项目基于 [dayGLANCE](https://github.com/krelltunez/dayGLANCE) v5.2.0 二次开发，遵循 MIT 许可证。\n
+个人微信接入目前作为独立的本地桥接脚本提供：只监听白名单群的新文字消息，筛选疑似任务后调用现有 Worker；启动时建立不上传的去重基线，也不会自动回复。启动方式见 [`wechat-bridge/README.md`](wechat-bridge/README.md)。

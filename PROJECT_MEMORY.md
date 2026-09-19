@@ -94,3 +94,11 @@
 - [GitHub Pages 服务范围](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)
 - [Workers 定价与免费计划](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Workers Secrets 配置](https://developers.cloudflare.com/workers/configuration/secrets/)
+
+## 2026-09-19 本地微信桥接与构建链路
+
+- 在保持 Worker 错误诊断和 GitHub Pages 工作流不变的前提下，新增 `wechat-bridge/` 本地桥接适配器，支持目标群文字筛选、去重、Worker 提取和本地 done 结果保存。
+- 新增 `scan-once.cmd`，首次运行只建立当前窗口基线，后续运行处理基线后的新文字并自动退出，避免持续占用桌面。
+- 网页新增“导入桥接结果”按钮；done JSON 会进入待确认收件箱，仍由用户逐条核对后写入浏览器本地任务。
+- 补齐 Vite、pnpm 锁定依赖和 `dist-campus/index.html` 根目录构建；远程副本验证通过 6 项前端测试、6 项桥接测试、Worker 语法检查和 Python 编译。
+- 当前变更已在独立远程副本中完成验证，尚未推送到 GitHub；现有 `pages.yml` 与 `deploy-worker.yml` 未修改。

@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowUpRight, ArrowRight, CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, ClipboardList, Clock3, Download, FileText, History, Inbox, LayoutDashboard, LockKeyhole, Plus, Settings2, Sparkles, Unlock, Upload, X } from 'lucide-react';
 import { assignLanes } from '../src/utils/intervalLanes.js';
+import { parseBridgeResults } from './bridge.js';
 import { applyCandidate, clock, emptyState, extractionSchema, minutes, parseLocal, schedule, shiftDateStr, stateSchema, today, uid, validateBackup } from './domain.js';
 import './style.css';
+import './bridge.css';
 
 const KEY = 'kexu-campus-v1';
 const priorityName = { high: '优先处理', normal: '普通', low: '不着急' };
@@ -20,7 +22,7 @@ function App() {
   const [source, setSource] = useState('课程群'), [reference, setReference] = useState(today()), [mode, setMode] = useState('local');
   const [busy, setBusy] = useState(false), [access, setAccess] = useState(''), [apiReady, setApiReady] = useState(false), [reasons, setReasons] = useState([]);
   const [filter, setFilter] = useState('active'), [query, setQuery] = useState(''), [undo, setUndo] = useState(null);
-  const importRef = useRef(), restoreRef = useRef(), modalRef = useRef();
+  const importRef = useRef(), bridgeRef = useRef(), restoreRef = useRef(), modalRef = useRef();
   const snapshot = useRef(data); snapshot.current = data;
   useEffect(() => { fetch('/api/health').then(r => r.json()).then(v => setApiReady(Boolean(v.aiConfigured))).catch(() => {}); }, []);
   useEffect(() => { if (!storageError) try { localStorage.setItem(KEY, JSON.stringify(data)); } catch { setStorageError('浏览器保存失败，请立即导出备份，避免刷新丢失。'); } }, [data, storageError]);
@@ -69,6 +71,15 @@ function App() {
     if (file.size > (restore ? 4_000_000 : 50000)) { setNotice('文件过大，请使用较小的文件'); return; }
     try { const raw = await file.text(); if (restore) { const v = validateBackup(JSON.parse(raw)); if (window.confirm(`备份包含 ${v.tasks.length} 项任务，将替换本机数据。继续恢复？`)) { setStorageError(''); commit(v); setNotice('备份已恢复，请重新排程'); } } else { setText(raw); setModal('import'); } } catch { setNotice('文件格式无效，原数据保持不变'); }
   };
+  const importBridgeFiles = async e => {
+    const files = [...(e.target.files || [])]; e.target.value = ''; if (!files.length) return;
+    try {
+      const values = await Promise.all(files.map(file => file.text().then(raw => JSON.parse(raw))));
+      const imported = values.flatMap(parseBridgeResults);
+      if (!imported.length) { setNotice('桥接结果中没有可确认的候选任务'); return; }
+      setCandidates(cs => [...cs, ...imported]); setView('inbox'); setModal(null); setNotice(`已导入 ${imported.length} 条桥接候选，请逐条确认`);
+    } catch (e) { setNotice(`桥接结果无效：${e.issues ? '请使用 done 目录中的 JSON 文件' : '文件格式无法读取'}`); }
+  };
   const exportData = () => { download(`课序备份-${today()}.json`, storageError && localStorage.getItem(KEY) ? localStorage.getItem(KEY) : JSON.stringify(data, null, 2)); setNotice('备份已导出，可在另一台电脑恢复'); };
   const shown = data.tasks.filter(t => (filter === 'all' || t.status === filter) && `${t.title} ${t.source}`.includes(query));
   const heading = { overview: '把今天，安排得刚刚好。', inbox: '每一条变化，都有迹可循。', tasks: '重要的事，一件件完成。', settings: '按你的节奏，安排时间。' }[view];
@@ -99,7 +110,8 @@ function App() {
       {view === 'settings' && <div className="settings-grid"><section className="panel settings-panel"><h2>每天的可用时间</h2><p>固定课程会从此时间范围中扣除。首版使用统一的每日窗口，时区为北京时间。</p><form onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); const start = minutes(f.get('start')), end = minutes(f.get('end')); if (end <= start) { setNotice('结束时间须晚于开始时间'); return; } commit({ ...data, settings: { start, end }, blocks: [] }); setNotice('可用时间已更新，请重新排程'); }}><div className="form-grid"><label>开始时间<input name="start" type="time" defaultValue={clock(data.settings.start)} min="08:00" max="21:45" required/></label><label>结束时间<input name="end" type="time" defaultValue={clock(data.settings.end)} min="08:15" max="22:00" required/></label></div><button className="primary" type="submit">保存时间</button></form><hr/><h2>固定事项</h2><p>把课程、会议等不可移动的时间先留出来。</p><button className="secondary" onClick={() => setModal('fixed')}><Plus size={16}/>添加固定事项</button>{data.fixed.map(f => <div className="fixed-row" key={f.id}><div><strong>{f.title}</strong><small>{f.date} · {clock(f.start)}–{clock(f.end)}</small></div><button aria-label={`删除${f.title}`} className="icon-button" onClick={() => { commit({ ...data, fixed: data.fixed.filter(v => v.id !== f.id), blocks: [] }); setNotice('已删除固定事项，可撤销'); }}><X size={16}/></button></div>)}</section><section className="panel settings-panel"><h2>数据与迁移</h2><p>任务只保存在当前浏览器。换电脑前导出备份，在新电脑打开课序并恢复，即可接续任务与通知证据。</p><div className="button-row"><button className="secondary" onClick={exportData}><Download size={16}/>导出 JSON</button><button className="secondary" onClick={() => restoreRef.current.click()}><Upload size={16}/>恢复备份</button></div><hr/><h2>识别能力</h2><p><strong>{apiReady ? '服务端 AI 接口已配置' : '当前可使用本地规则识别'}</strong></p><p>本地规则支持带引号的事项名、明确日期、星期和基础变更关键词。复杂语义需要 AI；“下节课前”“第八周”等缺少课表上下文的日期需手动确认。</p><p>模型密钥仅配置在服务器，导入弹窗中的访问码用于访问已部署的 AI 接口。</p><hr/><h2>开源基础</h2><p>基于 dayGLANCE v5.2.0 建立独立校园入口，复用其日期运算与日历时间块分栏算法。通知追踪、审核和约束排程是本项目新增模块。</p><a href="https://github.com/krelltunez/dayGLANCE" target="_blank" rel="noreferrer">dayGLANCE · MIT <ArrowUpRight size={14}/></a></section></div>}
       <footer><span>课序 · AI 校园日程</span><span>先确认，再安排。<span className="footer-dot">•</span>MVP 0.1</span></footer></div>
     </main>
-    <input hidden ref={importRef} type="file" accept=".txt,text/plain" onChange={importFile}/><input hidden ref={restoreRef} type="file" accept=".json,application/json" onChange={e => importFile(e, true)}/>
+    <input hidden ref={importRef} type="file" accept=".txt,text/plain" onChange={importFile}/><input hidden ref={bridgeRef} type="file" accept=".json,application/json" multiple onChange={importBridgeFiles}/><input hidden ref={restoreRef} type="file" accept=".json,application/json" onChange={e => importFile(e, true)}/>
+    {!modal && <button className="bridge-import-global secondary" onClick={() => bridgeRef.current.click()}><Upload size={16}/>导入桥接结果</button>}
     {notice && <div className="toast" role="status">{notice}</div>}{undo && <button className="undo" onClick={() => { setData(undo); setUndo(null); setReasons([]); setNotice('已撤销上一步'); }}>撤销上一步</button>}
     {modal && <div className="modal-shade" onMouseDown={e => { if (e.target === e.currentTarget && !busy) setModal(null); }}><section ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-title"><h2 id="modal-title">{modal === 'import' ? '把通知交给课序' : modal === 'fixed' ? '留出固定时间' : '任务与变更记录'}</h2><button className="icon-button" aria-label="关闭弹窗" disabled={busy} onClick={() => setModal(null)}><X size={20}/></button></div>
       {modal === 'import' && <><p>粘贴群通知，一行一条。提取后可修改，确认前不会写入日程。</p><div className="form-grid"><label>通知来源<input value={source} maxLength={100} onChange={e => setSource(e.target.value)}/></label><label>消息发出日期<input type="date" value={reference} onChange={e => setReference(e.target.value)}/></label></div><label>通知原文<textarea rows={7} maxLength={12000} placeholder={'例如：老师：「实验报告」请在下周五 18:00 前提交。\n建议使用「事项名称」，帮助本地规则准确提取。'} value={text} onChange={e => setText(e.target.value)}/></label><div className="import-tools"><button className="text-button" onClick={() => importRef.current.click()}><FileText size={16}/>读取 TXT</button><button className="text-button" onClick={demo}>填入示例</button><span>{text.length}/12000</span></div><label>识别方式<select value={mode} onChange={e => setMode(e.target.value)}><option value="local">本地规则 · 无需联网，不调用 AI</option><option value="ai" disabled={!apiReady}>服务端 AI · {apiReady ? '可用' : '待配置'}</option></select></label>{mode === 'ai' && <><label>接口访问码<input type="password" autoComplete="off" value={access} onChange={e => setAccess(e.target.value)} placeholder="仅本次页面内使用"/></label><p className="hint">点击提取将把原文和至多 100 项待办的名称、来源、截止时间发送至已配置的模型服务。</p></>}<div className="modal-actions"><button className="secondary" disabled={busy} onClick={() => setModal(null)}>稍后再说</button><button className="primary" disabled={busy || !text.trim()} onClick={analyze}><Sparkles size={17}/>{busy ? '正在提取…' : '提取待办事项'}</button></div></>}

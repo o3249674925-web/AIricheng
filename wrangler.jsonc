@@ -4,5 +4,12 @@
   "main": "worker.js",
   "compatibility_date": "2026-09-16",
   "assets": { "directory": "./dist-campus", "binding": "ASSETS", "not_found_handling": "single-page-application" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kexu-campus-accounts",
+      "database_id": "d153d6c6-dcbf-4e29-bcc1-5a9b05dc98ff"
+    }
+  ],
   "observability": { "enabled": true }
 }

@@ -79,3 +79,17 @@ PUT  /api/sync/push
 4. 在 Cloudflare Secret 中录入 AppSecret 与状态签名密钥。
 
 不要把 AppID、AppSecret、邮件服务密钥、Cloudflare Token 或 AI API Key 发到聊天；它们只能通过对应服务的 Secret/环境变量输入。
+
+## 零成本试验方案
+
+GitHub Pages (`o3249674925-web.github.io/AIricheng`) 只能托管静态文件，不能执行 `/api/auth/wechat/callback`。若让 Pages 页面直接调用 Worker，还要额外处理跨域 Cookie 和两个站点的回跳，复杂度和失败点都会增加。
+
+因此第一轮可以先尝试把现有 Worker 域名作为微信网站应用的官网和授权回调域：
+
+```text
+官网：https://kexu-campus-mvp.richeng.workers.dev
+授权回调域：kexu-campus-mvp.richeng.workers.dev
+完整回调地址：https://kexu-campus-mvp.richeng.workers.dev/api/auth/wechat/callback
+```
+
+微信平台是否接受 `workers.dev` 需要以创建/审核页面的实际结果为准；如果它要求可证明归属的自有域名、备案或拒绝共享托管域名，不能用 GitHub Pages 绕过，只能再评估自有域名或其他托管方案。GitHub Pages 继续保持现状，不作为账号回调服务器。

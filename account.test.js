@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authConfigured, authMode, buildAuthorizeUrl, readCookie, stateCookieValue, validStateCookie } from './account.js';
+import { authConfigured, authMode, buildAuthorizeUrl, formatRecoveryCode, generateRecoveryCode, normalizeRecoveryCode, readCookie, stateCookieValue, validStateCookie } from './account.js';
 
 describe('微信账号授权 helpers', () => {
   it('只有完整的 D1、应用和状态密钥配置才启用账号功能', () => {
@@ -28,5 +28,13 @@ describe('微信账号授权 helpers', () => {
   it('读取指定 Cookie 而不误取同名前缀', () => {
     const request = new Request('https://app.example.com/', { headers: { Cookie: 'foo=1; richeng_session=token; richeng_session_old=old' } });
     expect(readCookie(request, 'richeng_session')).toBe('token');
+  });
+
+  it('生成可人工抄写的 20 位恢复码并接受连字符格式', () => {
+    const code = generateRecoveryCode();
+    expect(code).toMatch(/^([A-Z2-9]{4}-){4}[A-Z2-9]{4}$/);
+    expect(normalizeRecoveryCode(code)).toHaveLength(20);
+    expect(formatRecoveryCode(normalizeRecoveryCode(code))).toBe(code);
+    expect(normalizeRecoveryCode('too-short')).toBe('');
   });
 });

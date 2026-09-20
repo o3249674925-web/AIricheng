@@ -18,15 +18,15 @@
 
 暂不做会员等级、支付、配额、多人协作、自动微信同步和后台定时任务。
 
-## 登录方式必须先选定
+## 已选择：恢复码同步
 
 | 方案 | 优点 | 必要条件与风险 |
 | --- | --- | --- |
-| 微信网页授权 | 国内用户操作最顺手 | 需要已认证的微信公众号/开放平台应用、回调域名和 AppID/Secret；还要处理隐私说明与授权失败 |
-| 邮箱魔法链接 | 不保存密码，开发较快 | 需要邮件服务和可用发信域名；国内收信速度、垃圾箱和服务商成本需实测 |
-| 自建账号密码 | 不依赖第三方登录 | 必须自行处理密码哈希、验证、找回、限流和风控；没有邮件/短信渠道时无法可靠找回，不建议作为第一版 |
+| 恢复码同步（当前） | 零第三方登录，适合低成本 MVP | 恢复码丢失后无法找回；它是访问凭据，不代表实名身份 |
+| 微信网页授权（暂缓） | 国内用户操作顺手 | 需要已认证的微信公众号/开放平台应用、回调域名和 AppID/Secret |
+| 邮箱魔法链接（备选） | 不保存密码 | 需要邮件服务和发信域名，国内到达率需实测 |
 
-如果主要用户是国内学生，优先评估微信网页授权；如果暂时没有微信开放平台凭据，先做邮箱魔法链接的技术验证。没有登录方式和回调域名之前，不应开始线上账号接口开发。
+恢复码只用于小规模测试和跨设备同步，不提供找回、实名、会员或支付能力。若未来需要正式公开账号，再单独评估微信或邮箱身份认证。
 
 ## 建议的服务端结构
 
@@ -36,25 +36,23 @@
 - 每条云端数据必须带 `user_id`，查询和写入都以会话用户为条件。
 - 本地数据首次上传前显示摘要和条数，用户明确确认后才上传；服务端不接收微信登录凭据或 AI API Key。
 
-当前代码已加入上述接口和 D1 迁移文件，但账号功能默认关闭：只有同时提供 D1 绑定、`WECHAT_APP_ID`、`WECHAT_APP_SECRET` 和 `AUTH_STATE_SECRET` 时，`/api/auth/wechat/start` 才会跳转到微信。当前 Worker 没有这些绑定，因此现有用户不会看到半成品登录入口，也不会影响 `/api/extract`。
+当前代码已加入恢复码接口和 D1 迁移文件，但账号功能默认关闭：只有提供 D1 绑定后，`/api/auth/recovery/create` 和 `/api/auth/recovery/login` 才会启用。当前 Worker 没有 D1 绑定，因此现有用户不会看到半成品登录入口，也不会影响 `/api/extract`。
 
 启用前需要由项目维护者在 Cloudflare 中完成以下配置（值不要写进仓库）：
 
 1. 创建 D1 数据库，将返回的 `database_id` 写入 `wrangler.jsonc` 的 `d1_databases` 绑定 `DB`。
 2. 执行 `wrangler d1 migrations apply <数据库名> --remote`，应用 `migrations/0001_accounts.sql`。
-3. 用 Wrangler Secret 输入 `WECHAT_APP_SECRET` 和 `AUTH_STATE_SECRET`；普通变量设置 `WECHAT_APP_ID`、`WECHAT_AUTH_MODE`（`website` 或 `official`）以及已在微信平台登记的 `WECHAT_REDIRECT_URI`。
-4. 只有在微信开放平台审核通过并配置回调域名后，才部署并做真实授权测试。
+3. 部署 Worker 后，在网站的「时间与数据 → 恢复码同步」中创建恢复码。任务快照会在浏览器端用恢复码派生的 AES-GCM 密钥加密，再上传到 D1。
+4. 不要把恢复码发到聊天；它丢失后无法找回，建议复制到密码管理器或纸面备份。
 
-网站应用扫码登录还需在微信开放平台登记“授权回调域”：只填写域名，例如 `app.example.com`，不要填 `https://`、路径或查询参数。代码中的 `WECHAT_REDIRECT_URI` 才填写完整回调地址，例如 `https://app.example.com/api/auth/wechat/callback`；两者必须属于同一域名。
-
-登录和同步接口的实际调用必须在配置完成后再测试；不能用现有的 AI 访问码或个人微信登录状态代替微信开放平台授权。
+同步接口的实际调用必须在配置完成后再测试；不能用现有的 AI 访问码或个人微信登录状态代替恢复码。
 
 建议接口：
 
 ```text
 GET  /api/auth/me
-GET  /api/auth/wechat/start
-GET  /api/auth/wechat/callback
+POST /api/auth/recovery/create
+POST /api/auth/recovery/login
 POST /api/auth/logout
 GET  /api/sync/pull
 PUT  /api/sync/push
@@ -64,23 +62,34 @@ PUT  /api/sync/push
 
 ## 发布前检查
 
-- 需要一个可稳定访问的自有域名；当前 `workers.dev` 和 GitHub Pages 入口继续保留作回退。
+- 恢复码模式可直接使用现有 `workers.dev` 地址；GitHub Pages 入口继续保留作静态回退。
 - 需要创建 D1 数据库并把绑定写入 `wrangler.jsonc`，这会产生新的 Cloudflare 资源，不能在没有账号方案时猜测。
 - 需要补充隐私说明：保存哪些任务字段、保存多久、如何删除账号和数据。
 - 需要先在本地测试登录回调、退出、数据隔离、导入失败回滚和会话过期，再部署 Worker。
 
 ## 当前待定项
 
-登录接口骨架已经完成，但上线前还缺以下外部条件：
+恢复码接口已经完成，但上线前还缺以下外部条件：
 
-1. 已审核通过的微信网站应用或公众号，以及对应的 AppID。
-2. 用于回调的自有域名（以及 DNS 是否已接入 Cloudflare）。
-3. Cloudflare D1 数据库和绑定。
-4. 在 Cloudflare Secret 中录入 AppSecret 与状态签名密钥。
+1. Cloudflare D1 数据库和绑定。
+2. 确认恢复码仅用于测试和跨设备同步，不承诺账号找回。
+3. 如果未来切换微信授权，再补充微信网站应用、回调域名和对应凭据。
 
 不要把 AppID、AppSecret、邮件服务密钥、Cloudflare Token 或 AI API Key 发到聊天；它们只能通过对应服务的 Secret/环境变量输入。
 
-## 零成本试验方案
+## 恢复码上线步骤
+
+恢复码模式不需要微信开放平台或自有域名，但仍需要 Worker 绑定 D1：
+
+1. 创建一个 Cloudflare D1 数据库，并把绑定名称设为 `DB`。
+2. 应用 `migrations/0001_accounts.sql`。
+3. 部署当前 Worker。
+4. 打开 Worker 网站，在「时间与数据 → 恢复码同步」点击「创建恢复码」。
+5. 在另一台设备打开同一 Worker 网站，点击「输入恢复码」，登录后再手动下载云端数据。
+
+云端只保存浏览器端加密后的快照；Worker 不需要知道恢复码明文。恢复码丢失时，仍可使用本机 JSON 备份恢复。
+
+## 微信方案（暂缓）
 
 GitHub Pages (`o3249674925-web.github.io/AIricheng`) 只能托管静态文件，不能执行 `/api/auth/wechat/callback`。若让 Pages 页面直接调用 Worker，还要额外处理跨域 Cookie 和两个站点的回跳，复杂度和失败点都会增加。
 

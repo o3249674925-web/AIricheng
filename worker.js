@@ -9,8 +9,12 @@ import {
   cookie,
   exchangeWeChatCode,
   fetchWeChatProfile,
+  formatRecoveryCode,
+  generateRecoveryCode,
   randomHex,
   readCookie,
+  recoveryConfigured,
+  normalizeRecoveryCode,
   sha256Hex,
   stateCookieValue,
   validStateCookie,
@@ -129,7 +133,7 @@ async function sessionUser(request, env) {
   if (!token) return null;
   const now = new Date().toISOString();
   const tokenHash = await sha256Hex(token);
-  const row = await env.DB.prepare('SELECT u.id, u.display_name, u.avatar_url, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?').bind(tokenHash, now).first();
+  const row = await env.DB.prepare('SELECT u.id, u.provider, u.display_name, u.avatar_url, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?').bind(tokenHash, now).first();
   return row || null;
 }
 
@@ -140,10 +144,49 @@ function authDisabled(env) {
 async function authMe(request, env, origin) {
   const user = await sessionUser(request, env);
   return json({
-    enabled: !authDisabled(env),
+    enabled: recoveryConfigured(env),
     authenticated: Boolean(user),
-    user: user ? { id: user.id, displayName: user.display_name, avatarUrl: user.avatar_url } : null,
+    provider: user?.provider || '',
+    user: user ? { id: user.id, provider: user.provider, displayName: user.display_name, avatarUrl: user.avatar_url } : null,
   }, 200, origin);
+}
+
+async function recoveryUser(request, env) {
+  const user = await sessionUser(request, env);
+  return user?.provider === 'recovery' ? user : null;
+}
+
+async function recoveryCreate(request, env, origin) {
+  if (!recoveryConfigured(env)) return json({ error: '恢复码同步尚未配置', diagnosticCode: 'recovery_not_configured' }, 503, origin);
+  const rawCode = generateRecoveryCode();
+  const code = normalizeRecoveryCode(rawCode);
+  const subject = await sha256Hex(code);
+  const now = new Date().toISOString();
+  const userId = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO users (id, provider, provider_subject, display_name, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(userId, 'recovery', subject, '恢复码账号', '', now, now).run();
+  const sessionToken = await randomHex(32);
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
+  await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(await sha256Hex(sessionToken), userId, now, expiresAt).run();
+  const headers = new Headers({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  headers.append('Set-Cookie', cookie(SESSION_COOKIE, sessionToken, SESSION_DAYS * 86400));
+  return new Response(JSON.stringify({ ok: true, code: formatRecoveryCode(code), user: { id: userId, provider: 'recovery', displayName: '恢复码账号', avatarUrl: '' } }), { status: 201, headers });
+}
+
+async function recoveryLogin(request, env, origin) {
+  if (!recoveryConfigured(env)) return json({ error: '恢复码同步尚未配置', diagnosticCode: 'recovery_not_configured' }, 503, origin);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: '恢复码格式无效', diagnosticCode: 'recovery_code_invalid' }, 400, origin); }
+  const code = normalizeRecoveryCode(body?.code);
+  if (!code) return json({ error: '恢复码格式无效，请检查是否包含 20 位字母或数字', diagnosticCode: 'recovery_code_invalid' }, 400, origin);
+  const subject = await sha256Hex(code);
+  const user = await env.DB.prepare('SELECT id, display_name, avatar_url FROM users WHERE provider = ? AND provider_subject = ?').bind('recovery', subject).first();
+  if (!user) return json({ error: '恢复码不存在或输入错误', diagnosticCode: 'recovery_code_not_found' }, 401, origin);
+  const now = new Date().toISOString();
+  const sessionToken = await randomHex(32);
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
+  await env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now).run();
+  await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(await sha256Hex(sessionToken), user.id, now, expiresAt).run();
+  return json({ ok: true, user: { id: user.id, provider: 'recovery', displayName: user.display_name, avatarUrl: user.avatar_url } }, 200, origin, { 'Set-Cookie': cookie(SESSION_COOKIE, sessionToken, SESSION_DAYS * 86400) });
 }
 
 async function authStart(request, env, origin) {
@@ -189,20 +232,20 @@ async function authLogout(request, env, origin) {
 }
 
 async function syncPull(request, env, origin) {
-  const user = await sessionUser(request, env);
-  if (!user) return json({ error: '请先登录微信账号', diagnosticCode: 'auth_required' }, 401, origin);
+  const user = await recoveryUser(request, env);
+  if (!user) return json({ error: '请先登录恢复码账号', diagnosticCode: 'auth_required' }, 401, origin);
   const row = await env.DB.prepare('SELECT schema_version, payload_json, device_id, updated_at FROM task_snapshots WHERE user_id = ?').bind(user.id).first();
   if (!row) return json({ snapshot: null }, 200, origin);
   try { return json({ snapshot: { schemaVersion: row.schema_version, payload: JSON.parse(row.payload_json), deviceId: row.device_id, updatedAt: row.updated_at } }, 200, origin); } catch { return json({ error: '云端数据损坏，请联系管理员', diagnosticCode: 'sync_payload_invalid' }, 500, origin); }
 }
 
 async function syncPush(request, env, origin) {
-  const user = await sessionUser(request, env);
-  if (!user) return json({ error: '请先登录微信账号', diagnosticCode: 'auth_required' }, 401, origin);
+  const user = await recoveryUser(request, env);
+  if (!user) return json({ error: '请先登录恢复码账号', diagnosticCode: 'auth_required' }, 401, origin);
   let body;
   try { body = await request.json(); } catch { return json({ error: '同步数据格式无效', diagnosticCode: 'sync_request_invalid' }, 400, origin); }
   const payload = body?.payload;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return json({ error: '同步数据格式无效', diagnosticCode: 'sync_payload_invalid' }, 400, origin);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.kind !== 'encrypted_snapshot' || payload.version !== 1 || typeof payload.salt !== 'string' || typeof payload.iv !== 'string' || typeof payload.ciphertext !== 'string') return json({ error: '同步数据格式无效', diagnosticCode: 'sync_payload_invalid' }, 400, origin);
   const payloadJson = JSON.stringify(payload);
   if (!payloadJson || payloadJson.length > MAX_SNAPSHOT) return json({ error: '同步数据不能为空或超过 900KB', diagnosticCode: 'sync_payload_too_large' }, 400, origin);
   const schemaVersion = Number.isInteger(body.schemaVersion) ? body.schemaVersion : 1;
@@ -218,8 +261,10 @@ export default { async fetch(request, env) {
   const origin = request.headers.get('Origin') || '';
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': allowOrigin(origin) ? origin : 'null', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'Content-Type,Authorization' } });
   const url = new URL(request.url);
-  if (url.pathname === '/api/health') return json({ ok: true, aiConfigured: configured(env), authConfigured: authConfigured(env) }, 200, origin);
+  if (url.pathname === '/api/health') return json({ ok: true, aiConfigured: configured(env), authConfigured: authConfigured(env), recoveryConfigured: recoveryConfigured(env) }, 200, origin);
   if (url.pathname === '/api/auth/me' && request.method === 'GET') return authMe(request, env, origin);
+  if (url.pathname === '/api/auth/recovery/create' && request.method === 'POST') return recoveryCreate(request, env, origin);
+  if (url.pathname === '/api/auth/recovery/login' && request.method === 'POST') return recoveryLogin(request, env, origin);
   if (url.pathname === '/api/auth/wechat/start' && request.method === 'GET') return authStart(request, env, origin);
   if (url.pathname === '/api/auth/wechat/callback' && request.method === 'GET') return authCallback(request, env, origin);
   if (url.pathname === '/api/auth/logout' && request.method === 'POST') return authLogout(request, env, origin);

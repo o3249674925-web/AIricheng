@@ -2,9 +2,30 @@ export const SESSION_COOKIE = 'richeng_session';
 export const STATE_COOKIE = 'richeng_oauth_state';
 export const SESSION_DAYS = 30;
 export const STATE_SECONDS = 600;
+const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 export function authConfigured(env) {
   return Boolean(env?.DB && env?.WECHAT_APP_ID && env?.WECHAT_APP_SECRET && env?.AUTH_STATE_SECRET);
+}
+
+export function recoveryConfigured(env) {
+  return Boolean(env?.DB);
+}
+
+export function normalizeRecoveryCode(value) {
+  const code = String(value || '').replace(/[\s-]/g, '').toUpperCase();
+  return /^[A-Z2-9]{20}$/.test(code) ? code : '';
+}
+
+export function formatRecoveryCode(code) {
+  const normalized = normalizeRecoveryCode(code);
+  return normalized ? normalized.match(/.{1,4}/g).join('-') : '';
+}
+
+export function generateRecoveryCode() {
+  const data = new Uint8Array(20);
+  crypto.getRandomValues(data);
+  return formatRecoveryCode(Array.from(data, value => RECOVERY_ALPHABET[value % RECOVERY_ALPHABET.length]).join(''));
 }
 
 export function authMode(env) {
